@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.pyo
+*.exe
+*.o
+generated_config.h

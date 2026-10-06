@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dependency-Aware Build Demonstrator</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESET & BASE
+═══════════════════════════════════════════════════════════════════════════ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:#f1f5f9;color:#0f172a;min-height:100vh;font-size:14px;
+}
+code,pre,samp,.mono{font-family:'Consolas','Cascadia Code','Monaco',monospace;}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEADER
+═══════════════════════════════════════════════════════════════════════════ */
+header{
+  background:#0f172a;color:#fff;padding:14px 28px;
+  display:flex;align-items:center;justify-content:space-between;
+  box-shadow:0 2px 12px rgba(0,0,0,.4);position:sticky;top:0;z-index:200;
+}
+.hdr-left h1{font-size:1.15rem;font-weight:700;letter-spacing:-.02em;}
+.hdr-left p{font-size:.75rem;color:#94a3b8;margin-top:3px;font-style:italic;}
+#ws-status{
+  font-size:.72rem;font-weight:700;padding:4px 12px;
+  border-radius:99px;background:rgba(255,255,255,.08);
+  transition:color .3s;
+}
+#ws-status.ok{color:#4ade80;}
+#ws-status.bad{color:#f87171;}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LAYOUT
+═══════════════════════════════════════════════════════════════════════════ */
+.wrap{max-width:1440px;margin:0 auto;padding:16px;}
+.main-grid{display:grid;grid-template-columns:1fr 360px;gap:14px;align-items:start;}
+.left{display:flex;flex-direction:column;gap:14px;}
+.right{display:flex;flex-direction:column;gap:14px;}
+.full{margin-top:14px;}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CARDS
+═══════════════════════════════════════════════════════════════════════════ */
+.card{
+  background:#fff;border-radius:10px;padding:18px 20px;
+  box-shadow:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.05);
+}
+.card-title{
+  font-size:.7rem;font-weight:800;text-transform:uppercase;
+  letter-spacing:.1em;color:#64748b;margin-bottom:14px;
+  display:flex;align-items:center;gap:8px;
+}
+.card-title::before{
+  content:'';width:3px;height:15px;background:#3b82f6;
+  border-radius:2px;flex-shrink:0;
+}
+.card-title.orange::before{background:#f59e0b;}
+.card-title.green::before{background:#22c55e;}
+.card-title.red::before{background:#ef4444;}
+.card-title.purple::before{background:#a855f7;}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DEPENDENCY GRAPH
+═══════════════════════════════════════════════════════════════════════════ */
+.graph-outer{display:flex;gap:0;align-items:flex-start;overflow-x:auto;}
+
+/* Chain column */
+.chain-col{
+  display:flex;flex-direction:column;align-items:center;
+  min-width:290px;flex:1;padding:0 8px;
+}
+.col-label{
+  font-size:.65rem;font-weight:800;text-transform:uppercase;
+  letter-spacing:.1em;padding:3px 10px;border-radius:4px;
+  margin-bottom:10px;text-align:center;white-space:nowrap;
+}
+.col-label.chain{color:#1e40af;background:#dbeafe;border:1px solid #bfdbfe;}
+.col-label.indep{color:#065f46;background:#dcfce7;border:1px solid #bbf7d0;}
+
+/* Divider */
+.graph-sep{
+  width:1px;background:linear-gradient(to bottom,transparent,#cbd5e1,transparent);
+  align-self:stretch;margin:0 16px;flex-shrink:0;position:relative;
+}
+.graph-sep::before{
+  content:'vs';position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  background:#e2e8f0;color:#94a3b8;font-size:.65rem;
+  font-weight:700;padding:3px 6px;border-radius:4px;white-space:nowrap;
+}
+
+/* Independent column */
+.indep-col{
+  display:flex;flex-direction:column;align-items:center;
+  min-width:270px;flex:1;padding:0 8px;
+}
+
+/* Graph nodes */
+.gnode{
+  border:2px solid #e2e8f0;background:#f8fafc;
+  border-radius:8px;padding:9px 12px;width:100%;
+  transition:border-color .3s,background .3s,box-shadow .3s;
+  position:relative;
+}
+.gnode-head{
+  display:flex;align-items:center;justify-content:space-between;gap:6px;
+  margin-bottom:3px;
+}
+.gnode-name{
+  font-size:.72rem;font-weight:700;font-family:monospace;
+  color:#1e293b;flex:1;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;
+}
+.gnode-cmd{font-size:.65rem;color:#64748b;font-family:monospace;}
+.gnode-dur{font-size:.62rem;color:#94a3b8;margin-top:2px;font-family:monospace;min-height:14px;}
+.gnode-err{
+  font-size:.63rem;color:#dc2626;margin-top:5px;font-family:monospace;
+  white-space:pre-wrap;background:#fef2f2;padding:5px 7px;
+  border-radius:4px;max-height:80px;overflow-y:auto;display:none;
+}
+
+/* Node states */
+.gnode.s-queued {border-color:#e2e8f0;background:#f8fafc;}
+.gnode.s-ready  {border-color:#93c5fd;background:#eff6ff;}
+.gnode.s-running{
+  border-color:#f59e0b;background:#fffbeb;
+  box-shadow:0 0 0 3px rgba(245,158,11,.2);
+  animation:node-pulse 1.6s ease-in-out infinite;
+}
+.gnode.s-done   {border-color:#4ade80;background:#f0fdf4;}
+.gnode.s-failed {border-color:#f87171;background:#fef2f2;}
+.gnode.s-blocked{border-color:#c4b5fd;background:#faf5ff;opacity:.8;}
+
+@keyframes node-pulse{
+  0%,100%{box-shadow:0 0 0 3px rgba(245,158,11,.2);}
+  50%    {box-shadow:0 0 0 7px rgba(245,158,11,.33);}
+}
+@keyframes concurrency-flash{
+  0%  {box-shadow:0 0 0 0 rgba(74,222,128,.9);}
+  100%{box-shadow:0 0 0 14px rgba(74,222,128,0);}
+}
+.flash{animation:concurrency-flash .9s ease-out;}
+
+/* State badges */
+.sbadge{
+  font-size:.62rem;font-weight:800;letter-spacing:.05em;
+  padding:2px 8px;border-radius:99px;text-transform:uppercase;
+  white-space:nowrap;flex-shrink:0;
+}
+.b-queued {background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1;}
+.b-ready  {background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;}
+.b-running{background:#fef3c7;color:#92400e;border:1px solid #fcd34d;}
+.b-done   {background:#dcfce7;color:#166534;border:1px solid #4ade80;}
+.b-failed {background:#fee2e2;color:#991b1b;border:1px solid #f87171;}
+.b-blocked{background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;}
+
+/* Arrows */
+.arrow{
+  display:flex;flex-direction:column;align-items:center;
+  padding:3px 0;color:#94a3b8;
+}
+.arrow::before{content:'│';font-size:1rem;color:#cbd5e1;line-height:1;}
+.arrow-label{font-size:.6rem;color:#94a3b8;margin-top:1px;}
+
+/* Artifact box */
+.artifact{
+  border:2px dashed #94a3b8;background:#f8fafc;border-radius:6px;
+  padding:7px 12px;width:100%;text-align:center;
+  transition:all .35s;
+}
+.artifact.ready{border-color:#4ade80;border-style:solid;background:#f0fdf4;}
+.artifact-name{
+  font-family:monospace;font-size:.75rem;font-weight:700;
+  color:#475569;display:block;
+}
+.artifact.ready .artifact-name{color:#166534;}
+.artifact-sub{font-size:.6rem;color:#94a3b8;display:block;margin-top:2px;}
+.artifact.ready .artifact-sub{color:#22c55e;}
+
+/* Parallel badge */
+.parallel-badge{
+  display:none;font-size:.68rem;font-weight:600;
+  background:#dcfce7;color:#065f46;border:1px solid #4ade80;
+  border-radius:6px;padding:6px 10px;text-align:center;
+  width:100%;margin-top:8px;line-height:1.5;
+}
+.parallel-badge.show{display:block;}
+
+/* Concurrency timeline (mini horizontal bars) */
+.concur-section{margin-top:10px;padding:10px 12px;background:#0f172a;border-radius:6px;display:none;}
+.concur-section.show{display:block;}
+.concur-title{font-size:.62rem;color:#64748b;font-weight:600;margin-bottom:6px;font-family:monospace;}
+.concur-row{display:flex;align-items:center;gap:6px;margin-bottom:4px;}
+.concur-label{font-size:.62rem;color:#94a3b8;font-family:monospace;width:120px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.concur-bar{height:12px;background:#374151;border-radius:3px;flex:1;position:relative;overflow:hidden;}
+.concur-fill{
+  height:100%;background:#f59e0b;border-radius:3px;
+  position:absolute;left:0;top:0;width:0%;
+  transition:width .3s;
+}
+.concur-fill.done{background:#4ade80;}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CONTROLS
+═══════════════════════════════════════════════════════════════════════════ */
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;}
+.btn{
+  padding:9px 16px;border:none;border-radius:7px;font-size:.78rem;
+  font-weight:700;cursor:pointer;transition:all .15s;
+  display:inline-flex;align-items:center;gap:6px;
+}
+.btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.18);}
+.btn:active:not(:disabled){transform:translateY(0);}
+.btn:disabled{opacity:.45;cursor:not-allowed;}
+.btn-primary{background:#3b82f6;color:#fff;}
+.btn-primary:hover:not(:disabled){background:#2563eb;}
+.btn-warn{background:#d97706;color:#fff;}
+.btn-warn:hover:not(:disabled){background:#b45309;}
+.btn-ghost{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;}
+.btn-ghost:hover:not(:disabled){background:#e2e8f0;}
+.btn-danger{background:#dc2626;color:#fff;}
+.btn-danger:hover:not(:disabled){background:#b91c1c;}
+
+.spinner-wrap{
+  display:none;align-items:center;gap:8px;font-size:.75rem;
+  color:#92400e;background:#fef3c7;border:1px solid #fcd34d;
+  border-radius:6px;padding:7px 12px;margin-top:10px;
+}
+.spinner-wrap.show{display:flex;}
+.spin{
+  width:14px;height:14px;border-radius:50%;
+  border:2px solid #fcd34d;border-top-color:#92400e;
+  animation:spin .7s linear infinite;flex-shrink:0;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+.status-bar{
+  display:none;margin-top:10px;padding:8px 12px;
+  border-radius:6px;font-size:.76rem;font-weight:600;
+}
+.status-bar.info   {display:block;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;}
+.status-bar.success{display:block;background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;}
+.status-bar.error  {display:block;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;}
+
+/* Failure banner */
+.fail-banner{
+  display:none;background:#450a0a;border:1px solid #dc2626;
+  border-radius:8px;padding:14px 16px;margin-bottom:14px;
+}
+.fail-banner.show{display:block;}
+.fail-banner h3{color:#f87171;font-size:.82rem;margin-bottom:6px;}
+.fail-banner p{color:#fca5a5;font-size:.75rem;line-height:1.6;}
+.fail-banner pre{
+  color:#fca5a5;font-size:.67rem;white-space:pre-wrap;
+  overflow-x:auto;margin-top:8px;background:rgba(0,0,0,.3);
+  padding:8px;border-radius:4px;max-height:140px;overflow-y:auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TASK STATUS TABLE
+═══════════════════════════════════════════════════════════════════════════ */
+table{width:100%;border-collapse:collapse;}
+th{
+  text-align:left;font-size:.65rem;font-weight:700;
+  text-transform:uppercase;letter-spacing:.06em;
+  color:#64748b;padding:5px 8px;border-bottom:2px solid #e2e8f0;
+}
+td{
+  padding:7px 8px;border-bottom:1px solid #f1f5f9;
+  font-size:.72rem;font-family:monospace;vertical-align:middle;
+}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:#fafafa;}
+.task-cell{font-weight:700;color:#1e293b;font-family:monospace;}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EVENT LOG
+═══════════════════════════════════════════════════════════════════════════ */
+#elog{
+  height:200px;overflow-y:auto;background:#020617;color:#e2e8f0;
+  border-radius:6px;padding:10px 12px;
+  font-family:'Consolas','Cascadia Code',monospace;font-size:.7rem;line-height:1.65;
+}
+#elog::-webkit-scrollbar{width:5px;}
+#elog::-webkit-scrollbar-track{background:#0f172a;}
+#elog::-webkit-scrollbar-thumb{background:#334155;border-radius:3px;}
+.le{padding:1px 0;}
+.lt{color:#334155;margin-right:8px;}
+.lk{color:#93c5fd;font-weight:700;}
+.ls-queued {color:#475569;}
+.ls-ready  {color:#60a5fa;}
+.ls-running{color:#fbbf24;}
+.ls-done   {color:#4ade80;}
+.ls-failed {color:#f87171;font-weight:700;}
+.ls-blocked{color:#c4b5fd;}
+.li{color:#334155;font-style:italic;}
+.lspec{color:#34d399;font-weight:700;}
+.lerr{color:#f87171;font-size:.66rem;}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EXPLANATION PANEL
+═══════════════════════════════════════════════════════════════════════════ */
+.exp-box{
+  border-radius:7px;padding:12px 14px;font-size:.76rem;
+  line-height:1.7;background:#f8fafc;border:1px solid #e2e8f0;
+}
+.exp-title{font-weight:700;font-size:.75rem;margin-bottom:7px;display:flex;align-items:center;gap:6px;}
+.exp-box.warn {background:#fffbeb;border-color:#fcd34d;}
+.exp-box.warn  .exp-title{color:#92400e;}
+.exp-box.danger{background:#fef2f2;border-color:#f87171;}
+.exp-box.danger .exp-title{color:#991b1b;}
+.exp-box.ok    {background:#f0fdf4;border-color:#4ade80;}
+.exp-box.ok    .exp-title{color:#166534;}
+.exp-box.purple{background:#faf5ff;border-color:#c4b5fd;}
+.exp-box.purple .exp-title{color:#6d28d9;}
+.exp-box.blue  {background:#eff6ff;border-color:#93c5fd;}
+.exp-box.blue  .exp-title{color:#1d4ed8;}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PROFESSOR MODE
+═══════════════════════════════════════════════════════════════════════════ */
+.prof-card{
+  background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);
+  color:#e2e8f0;border-radius:10px;padding:22px 24px;
+  box-shadow:0 4px 20px rgba(0,0,0,.25);
+}
+.prof-card .card-title{color:#64748b;}
+.prof-card .card-title::before{background:#f59e0b;}
+
+.key-quote{
+  font-size:1rem;font-weight:700;text-align:center;
+  padding:16px 20px;background:rgba(255,255,255,.05);
+  border:1px solid rgba(255,255,255,.1);border-radius:8px;
+  margin-bottom:18px;line-height:1.6;font-style:italic;color:#f1f5f9;
+}
+.key-quote em{color:#60a5fa;font-style:normal;font-weight:800;}
+
+.flow-row{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;}
+.flow-box{
+  text-align:center;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12);border-radius:8px;
+  padding:10px 18px;min-width:110px;
+}
+.flow-box .fl{font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin-bottom:3px;}
+.flow-box .fv{font-family:monospace;font-size:.85rem;font-weight:700;}
+.flow-box.prod .fv{color:#60a5fa;}
+.flow-box.art  .fv{color:#4ade80;}
+.flow-box.cons .fv{color:#f59e0b;}
+.flow-arr{color:#374151;font-size:1.1rem;}
+
+.prof-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;}
+.prof-point{
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  border-radius:6px;padding:12px;font-size:.73rem;color:#94a3b8;line-height:1.6;
+}
+.prof-point strong{color:#e2e8f0;display:block;margin-bottom:4px;font-size:.74rem;}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE
+═══════════════════════════════════════════════════════════════════════════ */
+@media(max-width:880px){
+  .main-grid{grid-template-columns:1fr;}
+  .graph-outer{flex-direction:column;}
+  .graph-sep{width:100%;height:1px;margin:12px 0;}
+  .prof-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hdr-left">
+    <h1>Dependency-Aware Parallel Build Demonstrator</h1>
+    <p>"Independent tasks run concurrently. Dependent tasks wait for required artifacts."</p>
+  </div>
+  <div id="ws-status" class="bad">● Connecting…</div>
+</header>
+
+<div class="wrap">
+
+  <!-- Failure banner (wrong-order demo) -->
+  <div class="fail-banner" id="fail-banner">
+    <h3>⚠ EXPECTED FAILURE — Wrong Compilation Order</h3>
+    <p id="fail-msg"></p>
+    <pre id="fail-err"></pre>
+  </div>
+
+  <div class="main-grid">
+
+    <!-- ════════════════════════════ LEFT COLUMN ════════════════════════════ -->
+    <div class="left">
+
+      <!-- ── DEPENDENCY GRAPH ─────────────────────────────────────────────── -->
+      <div class="card">
+        <div class="card-title">Dependency Graph</div>
+
+        <div class="graph-outer">
+
+          <!-- Chain -->
+          <div class="chain-col">
+            <div class="col-label chain">Dependency Chain — order must be respected</div>
+
+            <div class="gnode s-queued" id="gn-generate_config_compile">
+              <div class="gnode-head">
+                <span class="gnode-name mono">generate_config_compile</span>
+                <span class="sbadge b-queued" id="gb-generate_config_compile">QUEUED</span>
+              </div>
+              <div class="gnode-cmd mono">gcc generate_config.c -o generate_config</div>
+              <div class="gnode-dur" id="gd-generate_config_compile"></div>
+              <div class="gnode-err" id="ge-generate_config_compile"></div>
+            </div>
+
+            <div class="arrow"><span class="arrow-label">produces executable</span></div>
+
+            <div class="gnode s-queued" id="gn-generate_config_run">
+              <div class="gnode-head">
+                <span class="gnode-name mono">generate_config_run</span>
+                <span class="sbadge b-queued" id="gb-generate_config_run">QUEUED</span>
+              </div>
+              <div class="gnode-cmd mono">./generate_config  ← runs the program</div>
+              <div class="gnode-dur" id="gd-generate_config_run"></div>
+              <div class="gnode-err" id="ge-generate_config_run"></div>
+            </div>
+
+            <div class="arrow"><span class="arrow-label">produces artifact</span></div>
+
+            <div class="artifact" id="artifact-box">
+              <span class="artifact-name mono">generated_config.h</span>
+              <span class="artifact-sub" id="artifact-sub">not yet created</span>
+            </div>
+
+            <div class="arrow"><span class="arrow-label">#include required by</span></div>
+
+            <div class="gnode s-queued" id="gn-consumer_compile">
+              <div class="gnode-head">
+                <span class="gnode-name mono">consumer_compile</span>
+                <span class="sbadge b-queued" id="gb-consumer_compile">QUEUED</span>
+              </div>
+              <div class="gnode-cmd mono">gcc consumer.c -o consumer</div>
+              <div class="gnode-dur" id="gd-consumer_compile"></div>
+              <div class="gnode-err" id="ge-consumer_compile"></div>
+            </div>
+
+            <div class="arrow"><span class="arrow-label"></span></div>
+
+            <div class="gnode s-queued" id="gn-consumer_run">
+              <div class="gnode-head">
+                <span class="gnode-name mono">consumer_run</span>
+                <span class="sbadge b-queued" id="gb-consumer_run">QUEUED</span>
+              </div>
+              <div class="gnode-cmd mono">./consumer</div>
+              <div class="gnode-dur" id="gd-consumer_run"></div>
+              <div class="gnode-err" id="ge-consumer_run"></div>
+            </div>
+
+          </div><!-- /chain-col -->
+
+          <div class="graph-sep"></div>
+
+          <!-- Independent tasks -->
+          <div class="indep-col">
+            <div class="col-label indep">Independent — can run concurrently</div>
+
+            <div class="gnode s-queued" id="gn-independent1_compile">
+              <div class="gnode-head">
+                <span class="gnode-name mono">independent1_compile</span>
+                <span class="sbadge b-queued" id="gb-independent1_compile">QUEUED</span>
+              </div>
+              <div class="gnode-cmd mono">gcc independent1.c -o independent1</div>
+              <div class="gnode-dur" id="gd-independent1_compile"></div>
+            </div>
+
+            <div style="height:10px"></div>
+
+            <div class="gnode s-queued" id="gn-independent2_compile">
+              <div class="gnode-head">
+                <span class="gnode-name mono">independent2_compile</span>
+                <span class="sbadge b-queued" id="gb-independent2_compile">QUEUED</span>
+              </div>
+              <div class="gnode-cmd mono">gcc independent2.c -o independent2</div>
+              <div class="gnode-dur" id="gd-independent2_compile"></div>
+            </div>
+
+            <div style="height:10px"></div>
+
+            <div class="gnode s-queued" id="gn-independent3_compile">
+              <div class="gnode-head">
+                <span class="gnode-name mono">independent3_compile</span>
+                <span class="sbadge b-queued" id="gb-independent3_compile">QUEUED</span>
+              </div>
+              <div class="gnode-cmd mono">gcc independent3.c -o independent3</div>
+              <div class="gnode-dur" id="gd-independent3_compile"></div>
+            </div>
+
+            <!-- Parallel concurrency indicator -->
+            <div class="parallel-badge" id="par-badge">
+              ⚡ Real parallel execution detected<br>
+              <strong>All three started at the same timestamp</strong>
+            </div>
+
+            <!-- Mini timeline -->
+            <div class="concur-section" id="concur-section">
+              <div class="concur-title">// Concurrent execution timeline</div>
+              <div class="concur-row">
+                <div class="concur-label">independent1</div>
+                <div class="concur-bar"><div class="concur-fill" id="cf1"></div></div>
+              </div>
+              <div class="concur-row">
+                <div class="concur-label">independent2</div>
+                <div class="concur-bar"><div class="concur-fill" id="cf2"></div></div>
+              </div>
+              <div class="concur-row">
+                <div class="concur-label">independent3</div>
+                <div class="concur-bar"><div class="concur-fill" id="cf3"></div></div>
+              </div>
+            </div>
+
+          </div><!-- /indep-col -->
+        </div><!-- /graph-outer -->
+      </div><!-- /graph card -->
+
+      <!-- ── CONTROLS ────────────────────────────────────────────────────── -->
+      <div class="card">
+        <div class="card-title orange">Controls</div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btn-sched" onclick="runScheduler()">
+            ▶ Run Dependency-Aware Demo
+          </button>
+          <button class="btn btn-warn" id="btn-wrong" onclick="runWrongOrder()">
+            ⚠ Run Wrong-Order Demo
+          </button>
+          <button class="btn btn-ghost" id="btn-clean" onclick="doClean()">
+            ✕ Clean
+          </button>
+          <button class="btn btn-ghost" onclick="resetUI()">
+            ↺ Reset UI
+          </button>
+        </div>
+        <div class="spinner-wrap" id="spinner">
+          <div class="spin"></div>
+          <span id="spin-text">Running…</span>
+        </div>
+        <div class="status-bar" id="status-bar"></div>
+      </div>
+
+      <!-- ── EVENT LOG ───────────────────────────────────────────────────── -->
+      <div class="card">
+        <div class="card-title" style="justify-content:space-between;">
+          <span>Event Log</span>
+          <button class="btn btn-ghost" style="padding:3px 10px;font-size:.68rem;" onclick="clearLog()">Clear</button>
+        </div>
+        <div id="elog"></div>
+      </div>
+
+    </div><!-- /left -->
+
+    <!-- ════════════════════════════ RIGHT COLUMN ═══════════════════════════ -->
+    <div class="right">
+
+      <!-- ── TASK STATUS ──────────────────────────────────────────────────── -->
+      <div class="card">
+        <div class="card-title green">Task Status</div>
+        <table>
+          <thead>
+            <tr><th>Task</th><th>State</th><th>Duration</th></tr>
+          </thead>
+          <tbody id="ttbody"></tbody>
+        </table>
+      </div>
+
+      <!-- ── LIVE EXPLANATION ────────────────────────────────────────────── -->
+      <div class="card">
+        <div class="card-title purple">Live Explanation</div>
+        <div class="exp-box" id="exp-box">
+          <div class="exp-title">Ready</div>
+          <p>Click <strong>Run Dependency-Aware Demo</strong> to see live explanations for each task state transition.</p>
+        </div>
+      </div>
+
+    </div><!-- /right -->
+  </div><!-- /main-grid -->
+
+  <!-- ══════════════════════════ PROFESSOR MODE ═══════════════════════════ -->
+  <div class="full">
+    <div class="prof-card">
+      <div class="card-title">Professor Mode</div>
+
+      <div class="key-quote">
+        "Dependencies don't prevent parallelism.<br>
+        They determine where parallelism is <em>safe</em>."
+      </div>
+
+      <div class="flow-row">
+        <div class="flow-box prod">
+          <div class="fl">Producer</div>
+          <div class="fv">generate_config</div>
+        </div>
+        <div class="flow-arr">→</div>
+        <div class="flow-box art">
+          <div class="fl">Artifact</div>
+          <div class="fv">generated_config.h</div>
+        </div>
+        <div class="flow-arr">→</div>
+        <div class="flow-box cons">
+          <div class="fl">Consumer</div>
+          <div class="fv">consumer.c</div>
+        </div>
+      </div>
+
+      <div class="prof-grid">
+        <div class="prof-point">
+          <strong>Why consumer_compile waits</strong>
+          consumer.c has <code>#include "generated_config.h"</code>. The GCC preprocessor must open this file before compilation begins. If it does not exist, the compiler fails immediately with a fatal error — not a race condition, a hard dependency.
+        </div>
+        <div class="prof-point">
+          <strong>Why independents run in parallel</strong>
+          independent1/2/3 share no output files and no input dependencies between them. The scheduler finds them all READY at the same time and dispatches three threads simultaneously. Real subprocess concurrency — check the log timestamps.
+        </div>
+        <div class="prof-point">
+          <strong>What the scheduler algorithm does</strong>
+          Every 150 ms, the scheduler scans all QUEUED tasks. If all dependencies are DONE → dispatch immediately. If any dependency is FAILED/BLOCKED → mark BLOCKED. This is topological sort + concurrent frontier dispatch.
+        </div>
+        <div class="prof-point">
+          <strong>Real-world analogy (SQLite)</strong>
+          <code>lemon.c</code> compiles to <code>lemon</code> → <code>lemon parse.y</code> produces <code>parse.h</code> → <code>tokenize.c</code> and <code>expr.c</code> <code>#include "parse.h"</code>. Exactly the same pattern. Production scale.
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /wrap -->
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const TASKS = [
+  'generate_config_compile','generate_config_run',
+  'consumer_compile','consumer_run',
+  'independent1_compile','independent2_compile','independent3_compile',
+];
+
+const INDEPS = ['independent1_compile','independent2_compile','independent3_compile'];
+
+const BADGE_CLS = {
+  QUEUED:'b-queued', READY:'b-ready', RUNNING:'b-running',
+  DONE:'b-done', FAILED:'b-failed', BLOCKED:'b-blocked',
+};
+const NODE_CLS = {
+  QUEUED:'s-queued', READY:'s-ready', RUNNING:'s-running',
+  DONE:'s-done', FAILED:'s-failed', BLOCKED:'s-blocked',
+};
+const ALL_NODE_CLS = Object.values(NODE_CLS);
+const ALL_BADGE_CLS = Object.values(BADGE_CLS);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════
+
+let ws = null;
+let buildMode = null;
+let indepStartTimes = {};   // task → ms timestamp when RUNNING
+let concurAnimHandle = null;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════════════
+
+function init() {
+  buildTaskTable();
+  connectWS();
+}
+
+function buildTaskTable() {
+  const tb = document.getElementById('ttbody');
+  tb.innerHTML = '';
+  TASKS.forEach(t => {
+    const tr = document.createElement('tr');
+    tr.id = 'tr-' + t;
+    tr.innerHTML =
+      `<td class="task-cell">${t}</td>` +
+      `<td><span class="sbadge b-queued" id="tb-${t}">QUEUED</span></td>` +
+      `<td id="td-${t}" style="color:#94a3b8">—</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WEBSOCKET
+// ═══════════════════════════════════════════════════════════════════════════
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen = () => {
+    setWS(true);
+    logEntry('system','WebSocket connected');
+  };
+  ws.onclose = () => {
+    setWS(false);
+    logEntry('system','WebSocket disconnected — reconnecting in 3 s…');
+    setTimeout(connectWS, 3000);
+  };
+  ws.onerror = () => logEntry('system','WebSocket error');
+  ws.onmessage = e => {
+    try { dispatch(JSON.parse(e.data)); } catch(x) { console.error(x); }
+  };
+}
+
+function setWS(ok) {
+  const el = document.getElementById('ws-status');
+  el.textContent = ok ? '● Connected' : '● Disconnected';
+  el.className = ok ? 'ok' : 'bad';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EVENT DISPATCHER
+// ═══════════════════════════════════════════════════════════════════════════
+
+function dispatch(ev) {
+  switch(ev.type) {
+    case 'snapshot':       onSnapshot(ev);        break;
+    case 'build_start':    onBuildStart(ev);       break;
+    case 'task_state':     onTaskState(ev);        break;
+    case 'wrong_order_failure': onWrongFail(ev);   break;
+    case 'build_complete': onBuildComplete(ev);    break;
+    case 'clean_done':     onCleanDone(ev);        break;
+  }
+}
+
+function onSnapshot(ev) {
+  if (ev.build_running) setBusy(true,'Build in progress…');
+  Object.values(ev.tasks || {}).forEach(applyTaskState);
+}
+
+function onBuildStart(ev) {
+  buildMode = ev.mode;
+  indepStartTimes = {};
+  hideFail();
+  const label = ev.mode === 'wrong_order' ? 'WRONG-ORDER DEMO' : 'DEPENDENCY-AWARE DEMO';
+  setBusy(true, ev.mode === 'wrong_order' ? 'Running wrong-order demo…' : 'Running dependency-aware build…');
+  logSpec(`=== ${label} STARTED ===`);
+  setExp('blue','Build in progress…',
+    'Watch the graph. Independent tasks (right) will start immediately. ' +
+    'consumer_compile will stay QUEUED until generated_config.h is produced.');
+}
+
+function onTaskState(ev) {
+  applyTaskState(ev);
+
+  const ts = fmtTime(ev.timestamp);
+  let line = `[${ts}] <span class="lk">${ev.task}</span> → ` +
+             `<span class="ls-${ev.state.toLowerCase()}">${ev.state}</span>`;
+  if (ev.duration !== null && ev.duration !== undefined)
+    line += ` <span class="lt">(${ev.duration.toFixed(2)}s)</span>`;
+  if (ev.reason)
+    line += ` <span class="lt">&lt;${ev.reason}&gt;</span>`;
+  logHTML(line);
+
+  // Show failed compiler output in log
+  if (ev.state === 'FAILED' && ev.output) {
+    ev.output.split('\n').slice(0,6).forEach(l => { if(l.trim()) logErr('  '+l); });
+  }
+
+  // Artifact milestone
+  if (ev.task === 'generate_config_run' && ev.state === 'DONE') {
+    markArtifact();
+    logSpec(`[${ts}] generated_config.h → CREATED`);
+  }
+
+  // Concurrency detection
+  checkConcurrency(ev.task, ev.state);
+
+  // Explanation update
+  updateExp(ev.task, ev.state, ev.output);
+}
+
+function onWrongFail(ev) {
+  document.getElementById('fail-msg').textContent = ev.message;
+  document.getElementById('fail-err').textContent = ev.error;
+  document.getElementById('fail-banner').classList.add('show');
+  setExp('danger','⚠ Expected Failure — Missing Dependency',
+    'consumer.c has #include "generated_config.h". ' +
+    'The C preprocessor cannot find this file because generate_config has not run. ' +
+    'This is a real GCC fatal error, not a simulation.');
+}
+
+function onBuildComplete(ev) {
+  setBusy(false);
+  const ts = fmtTime(ev.timestamp);
+  if (ev.success) {
+    logSpec(`[${ts}] === BUILD COMPLETE — ALL TASKS SUCCEEDED ===`);
+    setBar('success','Build completed successfully. All tasks passed.');
+    setExp('ok','Build Succeeded',
+      'The dependency-aware scheduler ensured consumer_compile ran only after ' +
+      'generated_config.h was produced. Independent tasks ran concurrently ' +
+      'with no ordering constraints between them.');
+  } else {
+    logErr(`[${ts}] === BUILD COMPLETE — SOME TASKS FAILED ===`);
+    if (buildMode !== 'wrong_order')
+      setBar('error','Build failed. Check the event log for details.');
+  }
+}
+
+function onCleanDone(ev) {
+  logSpec(`[${fmtTime(ev.timestamp)}] === CLEAN DONE ===`);
+  setBar('info','Demo directory cleaned.');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UI STATE HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function applyTaskState(ev) {
+  const { task, state, duration, output } = ev;
+
+  // Graph node
+  const node = document.getElementById('gn-' + task);
+  if (node) {
+    node.classList.remove(...ALL_NODE_CLS);
+    node.classList.add(NODE_CLS[state] || 's-queued');
+  }
+
+  // Graph badge
+  const badge = document.getElementById('gb-' + task);
+  if (badge) {
+    badge.className = 'sbadge ' + (BADGE_CLS[state] || 'b-queued');
+    badge.textContent = state;
+  }
+
+  // Duration on graph node
+  const dur = document.getElementById('gd-' + task);
+  if (dur && duration !== null && duration !== undefined)
+    dur.textContent = duration.toFixed(2) + 's';
+
+  // Error output on graph node
+  const err = document.getElementById('ge-' + task);
+  if (err) {
+    if (state === 'FAILED' && output) {
+      err.textContent = output.substring(0, 250);
+      err.style.display = 'block';
+    } else if (state !== 'FAILED') {
+      err.style.display = 'none';
+    }
+  }
+
+  // Table badge
+  const tb = document.getElementById('tb-' + task);
+  if (tb) {
+    tb.className = 'sbadge ' + (BADGE_CLS[state] || 'b-queued');
+    tb.textContent = state;
+  }
+
+  // Table duration
+  const td = document.getElementById('td-' + task);
+  if (td && duration !== null && duration !== undefined) {
+    td.textContent = duration.toFixed(2) + 's';
+    td.style.color = '';
+  }
+}
+
+function markArtifact() {
+  document.getElementById('artifact-box').classList.add('ready');
+  document.getElementById('artifact-sub').textContent = '✓ created by generate_config';
+}
+
+// ─── Concurrency detection ─────────────────────────────────────────────────
+
+function checkConcurrency(task, state) {
+  if (!INDEPS.includes(task)) return;
+
+  if (state === 'RUNNING') {
+    indepStartTimes[task] = Date.now();
+
+    // Count how many are running
+    const runCount = INDEPS.filter(t => {
+      const b = document.getElementById('gb-' + t);
+      return b && b.textContent === 'RUNNING';
+    }).length;
+
+    if (runCount >= 2) {
+      // Show concurrency badge and timeline
+      document.getElementById('par-badge').classList.add('show');
+      document.getElementById('concur-section').classList.add('show');
+
+      // Flash all running nodes
+      INDEPS.forEach((t, i) => {
+        const n = document.getElementById('gn-' + t);
+        if (n && n.classList.contains('s-running')) {
+          n.classList.remove('flash');
+          void n.offsetWidth;
+          n.classList.add('flash');
+          setTimeout(() => n.classList.remove('flash'), 950);
+        }
+      });
+
+      // Animate timeline bars
+      startConcurAnimation();
+    }
+  }
+
+  if (state === 'DONE') {
+    // Mark that bar as done
+    const idx = INDEPS.indexOf(task);
+    if (idx >= 0) {
+      const fill = document.getElementById('cf' + (idx + 1));
+      if (fill) { fill.style.width = '100%'; fill.classList.add('done'); }
+    }
+
+    // If all done, update badge text
+    const allDone = INDEPS.every(t => {
+      const b = document.getElementById('gb-' + t);
+      return b && b.textContent === 'DONE';
+    });
+    if (allDone) {
+      stopConcurAnimation();
+      document.getElementById('par-badge').innerHTML =
+        '✓ All 3 compiled concurrently — real parallel execution<br>' +
+        '<strong>Check log timestamps to verify</strong>';
+    }
+  }
+}
+
+function startConcurAnimation() {
+  if (concurAnimHandle) return;
+  const start = Date.now();
+  const fills = [
+    document.getElementById('cf1'),
+    document.getElementById('cf2'),
+    document.getElementById('cf3'),
+  ];
+  concurAnimHandle = setInterval(() => {
+    const elapsed = (Date.now() - start) / 1000;   // seconds
+    fills.forEach((f, i) => {
+      if (!f || f.classList.contains('done')) return;
+      const pct = Math.min(95, (elapsed / 1.5) * 100);
+      f.style.width = pct + '%';
+    });
+  }, 80);
+}
+
+function stopConcurAnimation() {
+  if (concurAnimHandle) { clearInterval(concurAnimHandle); concurAnimHandle = null; }
+}
+
+// ─── Explanation panel ──────────────────────────────────────────────────────
+
+function updateExp(task, state) {
+  // Update explanation based on key transitions
+  if (task === 'consumer_compile' && state === 'QUEUED') {
+    setExp('purple','⏳ Why is consumer_compile QUEUED?',
+      'consumer.c contains <code>#include "generated_config.h"</code>. ' +
+      'This file does not exist yet. The scheduler tracks the dependency edge: ' +
+      'consumer_compile → generate_config_run. It will not dispatch consumer_compile ' +
+      'until that dependency is DONE.');
+  } else if (task === 'generate_config_run' && state === 'DONE') {
+    setExp('ok','✅ generated_config.h is now available',
+      'generate_config has been run and written generated_config.h to disk. ' +
+      'The dependency is satisfied. consumer_compile will be promoted to READY on the next scheduler tick.');
+  } else if (task === 'consumer_compile' && state === 'READY') {
+    setExp('blue','🔵 consumer_compile is now READY',
+      'All dependencies for consumer_compile are DONE. ' +
+      'The scheduler will dispatch it immediately — the compiler can now ' +
+      'resolve the #include directive because generated_config.h exists.');
+  } else if (task === 'consumer_compile' && state === 'RUNNING') {
+    setExp('warn','🔄 consumer_compile is RUNNING',
+      'generated_config.h is present on disk. ' +
+      'GCC can now process the #include and compile consumer.c successfully. ' +
+      'Note: this task was intentionally blocked until this moment.');
+  } else if (task === 'consumer_compile' && state === 'FAILED' && buildMode === 'wrong_order') {
+    setExp('danger','⚠ EXPECTED FAILURE — Wrong Order',
+      'consumer.c was compiled before generate_config was run. ' +
+      'generated_config.h does not exist yet. This is a real GCC fatal error. ' +
+      'The dependency cannot be satisfied retroactively.');
+  } else if (INDEPS.includes(task) && state === 'RUNNING') {
+    setExp('ok','⚡ Why are independent tasks running concurrently?',
+      'independent1, independent2, and independent3 have no unmet dependencies. ' +
+      'They share no output files and no required input artifacts. ' +
+      'The scheduler identified all three as READY simultaneously and dispatched ' +
+      'them in parallel threads. This is safe.');
+  } else if (task === 'consumer_run' && state === 'DONE') {
+    setExp('ok','✓ Full dependency chain completed',
+      'consumer ran successfully and printed the value from generated_config.h. ' +
+      'The scheduler enforced correct ordering while running everything that ' +
+      'could be parallelised in parallel. Proof: independent1/2/3 timestamps overlap.');
+  } else if (state === 'BLOCKED') {
+    setExp('danger','🚫 Task BLOCKED — dependency failed',
+      task + ' cannot run because one of its required dependencies has FAILED. ' +
+      'The scheduler propagates failures downstream to prevent wasted work.');
+  }
+}
+
+function setExp(cls, title, text) {
+  const box = document.getElementById('exp-box');
+  box.className = 'exp-box ' + (cls || '');
+  box.innerHTML = `<div class="exp-title">${title}</div><p>${text}</p>`;
+}
+
+// ─── Build busy state ───────────────────────────────────────────────────────
+
+function setBusy(on, text) {
+  const sp = document.getElementById('spinner');
+  const st = document.getElementById('spin-text');
+  sp.classList.toggle('show', on);
+  if (st && text) st.textContent = text;
+  ['btn-sched','btn-wrong','btn-clean'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.disabled = on;
+  });
+}
+
+function setBar(type, msg) {
+  const b = document.getElementById('status-bar');
+  b.className = 'status-bar ' + (type || '');
+  b.textContent = msg;
+}
+
+function hideFail() {
+  document.getElementById('fail-banner').classList.remove('show');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTROLS
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function runScheduler() {
+  if (!confirm('This will clean the demo directory and run the dependency-aware scheduler. Continue?')) return;
+  resetUI();
+  const r = await fetch('/api/run-scheduler', { method:'POST' });
+  if (!r.ok) { const e = await r.json(); setBar('error', e.error || 'Error'); }
+}
+
+async function runWrongOrder() {
+  if (!confirm('Demonstrate the wrong compilation order? (consumer.c will be compiled without the header.) Continue?')) return;
+  resetUI();
+  const r = await fetch('/api/run-wrong-order', { method:'POST' });
+  if (!r.ok) { const e = await r.json(); setBar('error', e.error || 'Error'); }
+}
+
+async function doClean() {
+  const r = await fetch('/api/clean', { method:'POST' });
+  if (r.ok) resetUI();
+}
+
+function resetUI() {
+  stopConcurAnimation();
+  TASKS.forEach(t => {
+    // Graph node
+    const n = document.getElementById('gn-' + t);
+    if (n) { n.classList.remove(...ALL_NODE_CLS); n.classList.add('s-queued'); }
+    const gb = document.getElementById('gb-' + t);
+    if (gb) { gb.className = 'sbadge b-queued'; gb.textContent = 'QUEUED'; }
+    const gd = document.getElementById('gd-' + t);
+    if (gd) gd.textContent = '';
+    const ge = document.getElementById('ge-' + t);
+    if (ge) { ge.textContent = ''; ge.style.display = 'none'; }
+    // Table
+    const tb = document.getElementById('tb-' + t);
+    if (tb) { tb.className = 'sbadge b-queued'; tb.textContent = 'QUEUED'; }
+    const td = document.getElementById('td-' + t);
+    if (td) { td.textContent = '—'; td.style.color = '#94a3b8'; }
+  });
+
+  // Artifact
+  document.getElementById('artifact-box').classList.remove('ready');
+  document.getElementById('artifact-sub').textContent = 'not yet created';
+
+  // Parallel badge
+  const pb = document.getElementById('par-badge');
+  pb.classList.remove('show');
+  pb.innerHTML = '⚡ Real parallel execution detected<br><strong>All three started at the same timestamp</strong>';
+
+  // Timeline
+  const cs = document.getElementById('concur-section');
+  cs.classList.remove('show');
+  [1,2,3].forEach(i => {
+    const f = document.getElementById('cf'+i);
+    if(f){f.style.width='0%';f.classList.remove('done');}
+  });
+
+  // Failure banner
+  hideFail();
+
+  // Status / spinner
+  setBar('','');
+  setBusy(false);
+
+  // Explanation
+  setExp('','Ready','Click Run Dependency-Aware Demo to see live explanations.');
+
+  indepStartTimes = {};
+  buildMode = null;
+}
+
+function clearLog() { document.getElementById('elog').innerHTML = ''; }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LOG HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function logHTML(html) {
+  const log = document.getElementById('elog');
+  const d = document.createElement('div');
+  d.className = 'le';
+  d.innerHTML = html;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+function logSpec(text) {
+  logHTML(`<span class="lspec">${esc(text)}</span>`);
+}
+function logErr(text) {
+  logHTML(`<span class="lerr">${esc(text)}</span>`);
+}
+function logEntry(type, text) {
+  logHTML(`<span class="li"># ${esc(text)}</span>`);
+}
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function fmtTime(iso) {
+  try {
+    return new Date(iso).toLocaleTimeString('en-US',{hour12:false});
+  } catch { return ''; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BOOTSTRAP
+// ═══════════════════════════════════════════════════════════════════════════
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+# This demo uses primarily Python standard library modules.
+# However, the web dashboard requires the following:
+fastapi
+uvicorn
